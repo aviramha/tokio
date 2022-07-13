@@ -151,16 +151,33 @@ feature! {
         {
             use std::io::Read;
 
-            let n = ready!(self.registration.poll_read_io(cx, || {
-                let b = &mut *(buf.unfilled_mut() as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]);
-                self.io.as_ref().unwrap().read(b)
-            }))?;
+            let mut n = 0;
 
-            // Safety: We trust `TcpStream::read` to have filled up `n` bytes in the
-            // buffer.
-            buf.assume_init(n);
-            buf.advance(n);
-            Poll::Ready(Ok(()))
+            let res = self.registration.poll_read_io(cx, || {
+                let b = &mut *(buf.unfilled_mut() as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]);
+                let len = b.len();
+                n = self.io.as_ref().unwrap().read(b)?;
+
+                if n == 0 || n == len {
+                    Ok(n)
+                } else {
+                    Err(io::ErrorKind::WouldBlock.into())
+                }
+            });
+
+            if let Poll::Ready(Err(e)) = res {
+                return Poll::Ready(Err(e));
+            }
+
+            if n > 0 {
+                // Safety: We trust `TcpStream::read` to have filled up `n` bytes in the
+                // buffer.
+                buf.assume_init(n);
+                buf.advance(n);
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
         }
 
         pub(crate) fn poll_write<'a>(&'a self, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>>
