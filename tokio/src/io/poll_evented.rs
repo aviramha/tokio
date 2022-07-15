@@ -156,11 +156,16 @@ feature! {
             let res = self.registration.poll_read_io(cx, || {
                 let b = &mut *(buf.unfilled_mut() as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]);
                 let len = b.len();
+
+                // n is the useful indicator of how many bytes are read, not `res`
                 n = self.io.as_ref().unwrap().read(b)?;
 
                 if n == 0 || n == len {
+                    // if we return a full buffer, the socket buffer might not be drained
                     Ok(n)
                 } else {
+                    // if we read a partially full buffer, this is sufficient to show that the
+                    // socket buffer has been drained
                     Err(io::ErrorKind::WouldBlock.into())
                 }
             });
